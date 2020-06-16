@@ -11,6 +11,20 @@ T MessageQueue<T>::receive()
     // FP.5a : The method receive should use std::unique_lock<std::mutex> and _condition.wait() 
     // to wait for and receive new messages and pull them from the queue using move semantics. 
     // The received object should then be returned by the receive function. 
+
+    // Lock mutex
+    std::unique_lock uLock(_mutex);
+
+    // Check if there are new messages
+    if (_messages.empty())
+    {
+        _cond.wait(uLock);
+    }
+
+    T msg = std::move(_messages.front());
+    _messages.pop_front();
+
+    return msg;
 }
 
 template <typename T>
@@ -43,6 +57,16 @@ void TrafficLight::waitForGreen()
     // FP.5b : add the implementation of the method waitForGreen, in which an infinite while-loop 
     // runs and repeatedly calls the receive function on the message queue. 
     // Once it receives TrafficLightPhase::green, the method returns.
+
+    while (true)
+    {
+        TrafficLightPhase oldestReceivedPhase = _queue.receive();
+
+        if (oldestReceivedPhase == TrafficLightPhase::green)
+        {
+            return;
+        }
+    }
 }
 
 TrafficLightPhase TrafficLight::getCurrentPhase()
@@ -68,6 +92,11 @@ void TrafficLight::cycleThroughPhases()
     // Generate random number between 4s and 6s
     std::mt19937 randonNumber = std::mt19937(std::random_device{}());
     std::uniform_real_distribution<> distr(4000.0, 6000.0);
+    double timeToWait = distr(randonNumber);
+    
+    std::unique_lock<std::mutex> uLock(_mtx);
+    std::cout << "Thread '" << std::this_thread::get_id() << "' has to wait for: " << timeToWait << " ms." << std::endl;
+    uLock.unlock();
 
     // Init stop watch
     auto lastUpdate = std::chrono::system_clock::now();
@@ -81,16 +110,22 @@ void TrafficLight::cycleThroughPhases()
         auto currentTime = std::chrono::system_clock::now();
         double timeSinceLastUpdate = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - lastUpdate).count();
 
-        if (timeSinceLastUpdate >= distr(randonNumber))
+        if (timeSinceLastUpdate >= timeToWait)
         {
             // Toggle between red and green
             _currentPhase = (_currentPhase == TrafficLightPhase::red) ? TrafficLightPhase::green : TrafficLightPhase::red;
+            
+            std::string color = (_currentPhase == TrafficLightPhase::red) ? "red" : "green";
+            uLock.lock();
+            std::cout << "Thread '" << std::this_thread::get_id() << "' has changed to color: " << color << std::endl;
+            uLock.unlock();
             
             // Send update message to the queue
             _queue.send(std::move(_currentPhase));
 
             // Generate new random number
             randonNumber = std::mt19937(std::random_device{}());
+            timeToWait = distr(randonNumber);
 
             // Reset stop watch
             lastUpdate = std::chrono::system_clock::now();
